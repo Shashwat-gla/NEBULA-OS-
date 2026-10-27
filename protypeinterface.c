@@ -1,396 +1,471 @@
-/*
-    Project Name : Nabula OS
-    Module       : Command Line Interface (CLI)
-    Version      : 0.1
 
-    Purpose:
-    This program provides a command-based interface
-    where users can enter commands such as help, info,
-    date, echo, uptime, clear, and exit.
+#include <stdio.h>      // printf, fgets, fopen, fclose, remove
+#include <string.h>     // strlen, strcmp, strchr, strcspn, memmove
+#include <stdlib.h>     // system, exit
+#include <time.h>       // time, ctime, difftime
+#include <ctype.h>      // isspace
+#include <direct.h>     // _getcwd, _chdir, _mkdir (Windows)
+#include <io.h>         // _findfirst, _findnext, _findclose (Windows)
+#include <sys/stat.h>   // File information and permissions metadata
 
-    Note:
-    This is currently a hosted C application running
-    on Windows, not yet a bootable operating system.
-*/
+#define VERSION "0.2"
+#define COMMAND_SIZE 512
+#define PATH_SIZE 1024
 
-#include <stdio.h>
-// Standard Input/Output Library
-// Provides printf(), fgets(), getchar(), fflush(), stdin and stdout.
-#include <string.h>
-// String Handling Library
-// Provides strlen(), strcmp(), strchr(), strcspn() and memmove().
-#include <stdlib.h>
-// Standard Library
-// Provides general-purpose utilities, including system().
-// Used here to execute the Windows "cls" command.
-// Note: system() is platform-dependent.
+typedef enum {
+    GUEST,
+    USER,
+    ADMIN
+} Role;
 
-#include <time.h>
-// Time Library
-// Provides time_t, time(), ctime() and difftime().
-// Used to display the current date/time and calculate CLI uptime.
+Role currentRole = USER;
+time_t startTime;
 
-#include <ctype.h>
-// Character Handling Library
-// Provides isspace() and other character-checking functions.
-// Used to identify spaces, tabs and other whitespace characters.
+/* Remove leading and trailing whitespace. */
+void trim(char *s) {
+    size_t start = 0;
+    size_t len;
 
-#define VERSION "0.1"
-// Macro Definition
-// Defines the version string in one place.
-// VERSION can be reused wherever the program displays its version.
+    while (isspace((unsigned char)s[start]))
+        start++;
 
-#define COMMAND_SIZE 200
-// Macro Definition
-// Sets the size of the input character array to 200 bytes.
-// This provides space for the command entered by the user,
-// including the terminating null character.
+    if (start > 0)
+        memmove(s, s + start, strlen(s + start) + 1);
 
-/*
-    Function: showBanner()
-    Purpose : Displays the startup banner of Nabula OS.
-    void    : The function does not return a value.
-    void parameter list means it takes no arguments.
-*/
-void showBanner(void) {
-    printf("\n");
-    printf("  ==========================================\n");
-    printf("       N A B U L A   O S\n");
-    printf("       Command Interface  v%s\n", VERSION);
-    printf("  ==========================================\n");
-    printf("  Type 'help' to explore available commands.\n");
+    len = strlen(s);
+
+    while (len > 0 && isspace((unsigned char)s[len - 1])) {
+        s[--len] = '\0';
+    }
+}
+
+/* Return the readable role name. */
+const char *roleName(void) {
+    if (currentRole == ADMIN) return "ADMIN";
+    if (currentRole == USER) return "USER";
+    return "GUEST";
 }
 
 /*
-    Function: showHelp()
-    Purpose : Displays all supported commands and
-              a short description of each command.
+   Demonstration-only role permissions.
+   These are application-level checks, not OS security.
 */
-void showHelp(void) {
+int canWrite(void) {
+    return currentRole == USER || currentRole == ADMIN;
+}
+
+int canDelete(void) {
+    return currentRole == ADMIN;
+}
+
+void banner(void) {
+    printf("\n====================================\n");
+    printf("          N A B U L A  O S\n");
+    printf("          CLI VERSION %s\n", VERSION);
+    printf("====================================\n");
+    printf("Type 'help' to see commands.\n");
+}
+
+void help(void) {
     printf("\n--- NABULA COMMAND DIRECTORY ---\n");
-    printf("  help          Show all commands\n");
-    printf("  info          Display system information\n");
-    printf("  version       Display product version\n");
-    printf("  about         About Nabula OS\n");
-    printf("  date          Show current date and time\n");
-    printf("  whoami        Show current user\n");
-    printf("  echo <text>   Display a message\n");
-    printf("  clear         Clear the terminal screen\n");
-    printf("  exit          Close the command interface\n");
-    printf("  uptime        Show CLI session uptime\n");
+    printf("help                 Show commands\n");
+    printf("info                 System information\n");
+    printf("version              Version information\n");
+    printf("about                About Nabula OS\n");
+    printf("date                 Current date/time\n");
+    printf("uptime               CLI session uptime\n");
+    printf("whoami               Current demo user\n");
+    printf("role                 Show current role\n");
+    printf("permissions          Show role permissions\n");
+    printf("switchrole <role>    Demo role switching\n");
+    printf("echo <text>          Print text\n");
+    printf("clear                Clear terminal\n");
+    printf("pwd                  Current directory\n");
+    printf("ls                   List files and folders\n");
+    printf("cd <directory>       Change directory\n");
+    printf("mkdir <directory>    Create a directory\n");
+    printf("touch <file>         Create a file if absent\n");
+    printf("cat <file>           Read a text file\n");
+    printf("write <file> <text>  Create/overwrite a text file\n");
+    printf("rm <file>            Delete a file (ADMIN only)\n");
+    printf("exit                 Close Nabula CLI\n");
 }
 
-/*
-    Function: showInfo()
-    Purpose : Displays basic information about the project.
-    Note    : These are program details, not live hardware
-              or actual operating-system kernel information.
-*/
 void showInfo(void) {
     printf("\n--- SYSTEM INFORMATION ---\n");
     printf("Product       : Nabula OS CLI\n");
     printf("Version       : %s\n", VERSION);
     printf("Interface     : Command Line\n");
-    printf("Status        : Running...\n");
+    printf("Host          : Windows\n");
     printf("Runtime       : Hosted C application\n");
-    printf("Host platform : Windows\n");
+    printf("Current role  : %s\n", roleName());
 }
 
-/*
-    Function: showVersion()
-    Purpose : Displays the current program version.
-*/
-void showVersion(void) {
-    printf("Nabula OS CLI version %s\n", VERSION);
-}
-
-/*
-    Function: showAbout()
-    Purpose : Explains the purpose and design principles
-              of the Nabula OS project.
-*/
 void showAbout(void) {
-    printf("\n--- ABOUT NABULA OS ---\n");
-    printf("Nabula OS provides a direct, command-oriented\n");
-    printf("computing interface designed for simplicity,\n");
-    printf("clarity, and lightweight interaction.\n");
-
-    printf("\nPRODUCT PRINCIPLES\n");
-    printf("  - Simple command interaction\n");
-    printf("  - Clear system feedback\n");
-    printf("  - Lightweight interface\n");
-    printf("  - Consistent user experience\n");
+    printf("\nNabula OS is an experimental command-line project.\n");
+    printf("Goals: simplicity, file management and access control.\n");
+    printf("This version is a hosted CLI, not a bootable kernel.\n");
 }
 
-/*
-    Function: showDate()
-    Purpose : Displays the current system date and time.
-
-    time(NULL):
-    Retrieves the current calendar time.
-
-    ctime():
-    Converts the time value into a readable date/time string.
-*/
 void showDate(void) {
     time_t now = time(NULL);
-    char *dateText = ctime(&now);
+    char *text = ctime(&now);
 
-    // Check whether the date/time string was obtained.
-    if (dateText == NULL) {
-        printf("Error: Date and time unavailable.\n");
-        return;
-    }
-
-    printf("Current date and time: %s", dateText);
+    if (text != NULL)
+        printf("Date and time: %s", text);
+    else
+        printf("Unable to read date/time.\n");
 }
 
-/*
-    Function: showUptime()
-    Purpose : Calculates how long the CLI has been running.
-
-    startTime:
-    The time recorded when main() starts the session.
-
-    difftime():
-    Calculates the difference between two time values in seconds.
-*/
-void showUptime(time_t startTime) {
+void showUptime(void) {
     time_t now = time(NULL);
 
-    // Calculate elapsed time since the CLI started.
-    double elapsed = difftime(now, startTime);
-
-    long totalSeconds;
-    long hours;
-    long minutes;
-    long seconds;
-
-    // Check for an invalid current time or negative elapsed time.
-    if (now == (time_t)-1 || elapsed < 0) {
-        printf("Error: Session time unavailable.\n");
+    if (now == (time_t)-1 || startTime == (time_t)-1) {
+        printf("Unable to calculate uptime.\n");
         return;
     }
 
-    // Convert elapsed seconds into hours, minutes and seconds.
-    totalSeconds = (long)elapsed;
+    long seconds = (long)difftime(now, startTime);
 
-    hours = totalSeconds / 3600;
-    minutes = (totalSeconds % 3600) / 60;
-    seconds = totalSeconds % 60;
+    if (seconds < 0) {
+        printf("Invalid elapsed time.\n");
+        return;
+    }
 
-    printf("CLI session uptime: %ldh %ldm %lds\n",
-           hours, minutes, seconds);
+    printf("CLI uptime: %ldh %ldm %lds\n",
+           seconds / 3600,
+           (seconds % 3600) / 60,
+           seconds % 60);
+}
+
+void showPermissions(void) {
+    printf("\n--- DEMO ACCESS POLICY ---\n");
+    printf("Current role: %s\n", roleName());
+    printf("Read/list files : YES\n");
+    printf("Create/edit     : %s\n",
+           canWrite() ? "YES" : "NO");
+    printf("Delete files    : %s\n",
+           canDelete() ? "YES" : "NO");
+    printf("Role switching  : DEMO ONLY\n");
+    printf("WARNING: This is not real OS security.\n");
+}
+
+void showPwd(void) {
+    char path[PATH_SIZE];
+
+    if (_getcwd(path, sizeof(path)) != NULL)
+        printf("%s\n", path);
+    else
+        printf("Unable to get current directory.\n");
+}
+
+/* List entries in the current Windows directory. */
+void listFiles(void) {
+    struct _finddata_t entry;
+    intptr_t handle = _findfirst("*", &entry);
+
+    if (handle == -1) {
+        printf("Unable to list directory.\n");
+        return;
+    }
+
+    do {
+        if (strcmp(entry.name, ".") != 0 &&
+            strcmp(entry.name, "..") != 0) {
+            if (entry.attrib & _A_SUBDIR)
+                printf("[DIR]  %s\n", entry.name);
+            else
+                printf("[FILE] %s\n", entry.name);
+        }
+    } while (_findnext(handle, &entry) == 0);
+
+    _findclose(handle);
+}
+
+void changeDirectory(const char *path) {
+    if (path == NULL || *path == '\0') {
+        printf("Usage: cd <directory>\n");
+        return;
+    }
+
+    if (_chdir(path) == 0)
+        showPwd();
+    else
+        printf("Cannot change directory.\n");
+}
+
+void makeDirectory(const char *name) {
+    if (!canWrite()) {
+        printf("Permission denied: USER role required.\n");
+        return;
+    }
+
+    if (name == NULL || *name == '\0') {
+        printf("Usage: mkdir <directory>\n");
+        return;
+    }
+
+    if (_mkdir(name) == 0)
+        printf("Directory created: %s\n", name);
+    else
+        printf("Unable to create directory.\n");
+}
+
+void touchFile(const char *name) {
+    FILE *fp;
+
+    if (!canWrite()) {
+        printf("Permission denied: USER role required.\n");
+        return;
+    }
+
+    if (name == NULL || *name == '\0') {
+        printf("Usage: touch <file>\n");
+        return;
+    }
+
+    /* Append mode creates a missing file without truncating an
+       existing file's contents. */
+    fp = fopen(name, "ab");
+
+    if (fp == NULL) {
+        printf("Unable to create/open file.\n");
+        return;
+    }
+
+    fclose(fp);
+    printf("File is ready: %s\n", name);
+}
+
+void readFile(const char *name) {
+    FILE *fp;
+    char line[1024];
+
+    if (name == NULL || *name == '\0') {
+        printf("Usage: cat <file>\n");
+        return;
+    }
+
+    fp = fopen(name, "r");
+
+    if (fp == NULL) {
+        printf("Unable to open file.\n");
+        return;
+    }
+
+    while (fgets(line, sizeof(line), fp) != NULL)
+        printf("%s", line);
+
+    fclose(fp);
+}
+
+void writeFile(char *args) {
+    char *space;
+    char *name;
+    char *text;
+    FILE *fp;
+
+    if (!canWrite()) {
+        printf("Permission denied: USER role required.\n");
+        return;
+    }
+
+    if (args == NULL || *args == '\0') {
+        printf("Usage: write <file> <text>\n");
+        return;
+    }
+
+    name = args;
+    space = strchr(args, ' ');
+
+    if (space == NULL) {
+        printf("Usage: write <file> <text>\n");
+        return;
+    }
+
+    *space = '\0';
+    text = space + 1;
+    trim(name);
+    trim(text);
+
+    if (*name == '\0' || *text == '\0') {
+        printf("Filename and text are required.\n");
+        return;
+    }
+
+    /* WARNING: "w" replaces existing file contents. */
+    fp = fopen(name, "w");
+
+    if (fp == NULL) {
+        printf("Unable to write file.\n");
+        return;
+    }
+
+    fprintf(fp, "%s\n", text);
+    fclose(fp);
+    printf("File written: %s\n", name);
+}
+
+void deleteFile(const char *name) {
+    if (!canDelete()) {
+        printf("Permission denied: ADMIN role required.\n");
+        return;
+    }
+
+    if (name == NULL || *name == '\0') {
+        printf("Usage: rm <file>\n");
+        return;
+    }
+
+    if (remove(name) == 0)
+        printf("File deleted: %s\n", name);
+    else
+        printf("Unable to delete file.\n");
 }
 
 /*
-    Function: clearScreen()
-    Purpose : Attempts to clear the terminal screen.
-
-    system("cls"):
-    Runs the Windows command used to clear the console.
-
-    Note:
-    This function is Windows-specific and uses system().
+   Dispatch a parsed command.
+   args points to the remaining text after the command.
 */
-void clearScreen(void) {
-    if (system("cls") != 0) {
-        printf("Unable to clear the terminal.\n");
+void executeCommand(char *cmd, char *args) {
+    if (strcmp(cmd, "help") == 0) {
+        help();
     }
-}
-
-/*
-    Function: trimWhitespace()
-    Purpose : Removes whitespace from the beginning
-              and end of a string.
-
-    Example:
-       Input  : "   help   "
-       Output : "help"
-
-    isspace():
-    Checks for spaces, tabs, newlines and other whitespace.
-
-    memmove():
-    Safely moves overlapping regions of memory.
-    It is used to shift the remaining string to the beginning.
-*/
-void trimWhitespace(char *text) {
-    size_t length;
-    size_t start = 0;
-
-    // Find the first character that is not whitespace.
-    while (isspace((unsigned char)text[start])) {
-        start++;
+    else if (strcmp(cmd, "info") == 0) {
+        showInfo();
     }
-
-    // Remove leading whitespace by shifting the string left.
-    if (start > 0) {
-        memmove(text, text + start, strlen(text + start) + 1);
+    else if (strcmp(cmd, "version") == 0) {
+        printf("Nabula OS CLI %s\n", VERSION);
     }
-
-    // Calculate the length after removing leading whitespace.
-    length = strlen(text);
-
-    // Remove trailing whitespace by inserting '\0'.
-    while (length > 0 &&
-           isspace((unsigned char)text[length - 1])) {
-        text[length - 1] = '\0';
-        length--;
+    else if (strcmp(cmd, "about") == 0) {
+        showAbout();
     }
-}
-
-/*
-    Function: main()
-    Purpose : Entry point of the C program.
-
-    Main responsibilities:
-    1. Initialize the command buffer and session timer.
-    2. Display the startup banner.
-    3. Read commands continuously.
-    4. Parse commands and their arguments.
-    5. Execute the matching function.
-    6. Exit when requested or when input closes.
-*/
-int main(void) {
-
-    // Character array used to store the user's input.
-    char input[COMMAND_SIZE];
-
-    // Pointer to the arguments following a command.
-    char *arguments;
-
-    // Pointer to the first space separating command and arguments.
-    char *separator;
-
-    // Record the start time of the CLI session.
-    time_t startTime = time(NULL);
-
-    // Display the startup banner once.
-    showBanner();
-
-    // Infinite loop: continue accepting commands until exit.
-    while (1) {
-
-        // Display the command prompt.
-        printf("\nNabula> ");
-
-        // Ensure the prompt appears immediately.
-        fflush(stdout);
-
-        // Read a complete line from standard input.
-        // fgets() reads at most sizeof(input) - 1 characters.
-        if (fgets(input, sizeof(input), stdin) == NULL) {
-            printf("\nInput closed. Exiting Nabula CLI.\n");
-            break;
+    else if (strcmp(cmd, "date") == 0) {
+        showDate();
+    }
+    else if (strcmp(cmd, "uptime") == 0) {
+        showUptime();
+    }
+    else if (strcmp(cmd, "whoami") == 0) {
+        printf("nabula-user (%s role)\n", roleName());
+    }
+    else if (strcmp(cmd, "role") == 0) {
+        printf("Current role: %s\n", roleName());
+    }
+    else if (strcmp(cmd, "permissions") == 0) {
+        showPermissions();
+    }
+    else if (strcmp(cmd, "switchrole") == 0) {
+        if (args == NULL) {
+            printf("Usage: switchrole guest|user|admin\n");
         }
-        /*
-            If the input buffer contains no newline and the
-            input stream has not ended, the line may be too long.
-            Discard the remaining characters to prevent them
-            from being interpreted as another command.
-        */
-        if (strchr(input, '\n') == NULL && !feof(stdin)) {
-            int ch;
-
-            while ((ch = getchar()) != '\n' && ch != EOF) {
-                // Discard extra input characters.
-            }
-
-            printf("Error: Input is too long. Try again.\n");
-            continue;
+        else if (strcmp(args, "guest") == 0) {
+            currentRole = GUEST;
+            printf("Demo role changed to GUEST.\n");
         }
-
-        // Remove the newline character from the input, if present.
-        input[strcspn(input, "\n")] = '\0';
-
-        // Remove leading and trailing whitespace.
-        trimWhitespace(input);
-
-        // Ignore an empty command.
-        if (input[0] == '\0') {
-            continue;
+        else if (strcmp(args, "user") == 0) {
+            currentRole = USER;
+            printf("Demo role changed to USER.\n");
         }
-
-        /*
-            Separate the command from its arguments.
-
-            Example:
-                Input      : echo Hello World
-                Command    : echo
-                Arguments  : Hello World
-        */
-        separator = strchr(input, ' ');
-        arguments = NULL;
-
-        if (separator != NULL) {
-            // Replace the separating space with the string terminator.
-            *separator = '\0';
-
-            // Arguments begin immediately after the separator.
-            arguments = separator + 1;
-
-            // Remove extra whitespace around the arguments.
-            trimWhitespace(arguments);
-        }
-
-        /*
-            Command Dispatcher:
-            strcmp() compares the entered command with each
-            supported command. A result of 0 means they match.
-        */
-
-        if (strcmp(input, "help") == 0) {
-            showHelp();
-        }
-        else if (strcmp(input, "info") == 0) {
-            showInfo();
-        }
-        else if (strcmp(input, "version") == 0) {
-            showVersion();
-        }
-        else if (strcmp(input, "about") == 0) {
-            showAbout();
-        }
-        else if (strcmp(input, "date") == 0) {
-            showDate();
-        }
-        else if (strcmp(input, "whoami") == 0) {
-            // Displays a predefined username.
-            // This is not the actual Windows account lookup.
-            printf("nabula-user\n");
-        }
-        else if (strcmp(input, "uptime") == 0) {
-            // Display how long this CLI session has been running.
-            showUptime(startTime);
-        }
-        else if (strcmp(input, "echo") == 0) {
-
-            // Check whether the user supplied any text.
-            if (arguments != NULL && arguments[0] != '\0') {
-                printf("%s\n", arguments);
-            }
-            else {
-                printf("Usage: echo <text>\n");
-            }
-        }
-        else if (strcmp(input, "clear") == 0) {
-            clearScreen();
-        }
-        else if (strcmp(input, "exit") == 0) {
-            printf("Closing Nabula command interface...\n");
-            break;
+        else if (strcmp(args, "admin") == 0) {
+            currentRole = ADMIN;
+            printf("Demo role changed to ADMIN.\n");
+            printf("Warning: role switching is not authenticated.\n");
         }
         else {
-            // Handle commands that are not recognized.
-            printf("Unknown command: %s\n", input);
-            printf("Type 'help' to view available commands.\n");
+            printf("Unknown role. Use guest, user or admin.\n");
         }
     }
+    else if (strcmp(cmd, "echo") == 0) {
+        if (args != NULL)
+            printf("%s\n", args);
+        else
+            printf("\n");
+    }
+    else if (strcmp(cmd, "clear") == 0) {
+        if (system("cls") != 0)
+            printf("Unable to clear screen.\n");
+    }
+    else if (strcmp(cmd, "pwd") == 0) {
+        showPwd();
+    }
+    else if (strcmp(cmd, "ls") == 0) {
+        listFiles();
+    }
+    else if (strcmp(cmd, "cd") == 0) {
+        changeDirectory(args);
+    }
+    else if (strcmp(cmd, "mkdir") == 0) {
+        makeDirectory(args);
+    }
+    else if (strcmp(cmd, "touch") == 0) {
+        touchFile(args);
+    }
+    else if (strcmp(cmd, "cat") == 0) {
+        readFile(args);
+    }
+    else if (strcmp(cmd, "write") == 0) {
+        writeFile(args);
+    }
+    else if (strcmp(cmd, "rm") == 0) {
+        deleteFile(args);
+    }
+    else {
+        printf("Unknown command: %s\n", cmd);
+        printf("Type 'help' for available commands.\n");
+    }
+}
 
-    // Display a closing message when the loop ends.
+int main(void) {
+    char input[COMMAND_SIZE];
+
+    startTime = time(NULL);
+    banner();
+
+    while (1) {
+        char *cmd;
+        char *args = NULL;
+        char *separator;
+
+        printf("\nNabula> ");
+        fflush(stdout);
+
+        if (fgets(input, sizeof(input), stdin) == NULL) {
+            printf("\nInput closed.\n");
+            break;
+        }
+
+        /* Detect a line longer than the input buffer. */
+        if (strchr(input, '\n') == NULL && !feof(stdin)) {
+            int ch;
+            while ((ch = getchar()) != '\n' && ch != EOF) {}
+            printf("Input too long. Try again.\n");
+            continue;
+        }
+
+        input[strcspn(input, "\n")] = '\0';
+        trim(input);
+
+        if (*input == '\0')
+            continue;
+
+        cmd = input;
+        separator = strchr(input, ' ');
+
+        if (separator != NULL) {
+            *separator = '\0';
+            args = separator + 1;
+            trim(args);
+        }
+
+        if (strcmp(cmd, "exit") == 0) {
+            printf("Closing Nabula CLI...\n");
+            break;
+        }
+
+        executeCommand(cmd, args);
+    }
+
     printf("Nabula CLI closed.\n");
-
-    // Return 0 to indicate successful program termination.
     return 0;
 }
